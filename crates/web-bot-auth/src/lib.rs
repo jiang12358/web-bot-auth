@@ -18,10 +18,15 @@
 /// to parse it from an incoming message.
 pub mod components;
 
+/// Implementation of a JSON Web Key manager suitable for use with `web-bot-auth`. Can be used for arbitrary
+/// HTTP message signatures as well.
+pub mod keyring;
+
 use components::CoveredComponent;
+use data_url::DataUrl;
 use indexmap::IndexMap;
+use keyring::{JSONWebKeySet, KeyRing, PublicKey};
 use sfv::SerializeValue;
-use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Write as _;
 use std::time::{Duration, Instant, SystemTime, SystemTimeError, UNIX_EPOCH};
@@ -84,10 +89,6 @@ pub enum WebBotAuthError {
     /// Thrown when the signature is detected to be expired, using the `expires`
     /// and `creates` method.
     SignatureIsExpired,
-    /// Thrown today only if a Signature-Agent header is provided and following
-    /// the link in that is enabled. In a future release, we may support fetching
-    /// and ingesting the key.
-    NotImplemented,
 }
 
 #[derive(Clone, Debug)]
@@ -304,15 +305,6 @@ impl fmt::Display for Algorithm {
         }
     }
 }
-
-/// Represents a public key to be consumed during the verification.
-pub type PublicKey = Vec<u8>;
-/// Represents a JSON Web Key base64-encoded thumpprint as implemented
-/// per [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638.html)
-pub type Thumbprint = String;
-/// A map from a thumbprint to the public key, to be used to map `keyid`s
-/// to public keys.
-pub type KeyRing = HashMap<Thumbprint, PublicKey>;
 
 /// Trait that messages seeking verification should implement to facilitate looking up
 /// raw values from the underlying message.
@@ -609,7 +601,7 @@ impl MessageVerifier {
     pub fn verify(
         self,
         keyring: &KeyRing,
-        key_id: Option<Thumbprint>,
+        key_id: Option<String>,
     ) -> Result<SignatureTiming, ImplementationError> {
         let keying_material = (match key_id {
             Some(key) => keyring.get(&key),
@@ -651,16 +643,27 @@ impl MessageVerifier {
 /// A trait that messages wishing to be verified as a `web-bot-auth` method specifically
 /// must implement.
 pub trait WebBotAuthSignedMessage: SignedMessage {
-    /// Obtain the parsed version of `Signature-Agent` HTTP header
-    fn fetch_signature_agent(&self) -> Option<String>;
+    /// Obtain every `Signature-Agent` header in the message. Despite the name, you can omit
+    /// `Signature-Agents` that are known to be invalid ahead of time. However, each `Signature-Agent`
+    /// header must be unparsed.
+    fn fetch_all_signature_agents(&self) -> Vec<String>;
 }
 
 /// A verifier for Web Bot Auth messages specifically.
 #[derive(Clone, Debug)]
 pub struct WebBotAuthVerifier {
     message_verifier: MessageVerifier,
-    /// The value of `Signature-Agent` header, if resolved to a link
-    key_directory: Option<String>,
+    /// List of valid `Signature-Agent` headers to try, if present.
+    parsed_directories: Vec<SignatureAgentLink>,
+}
+
+/// The different types of URLs a `Signature-Agent` can have.
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub enum SignatureAgentLink {
+    /// A data URL that was parsed into a JSON Web Key Set ahead of time.
+    Inline(JSONWebKeySet),
+    /// An external https:// or http:// URL that requires resolution into a JSON Web Key Set
+    External(String),
 }
 
 impl WebBotAuthVerifier {
@@ -675,24 +678,7 @@ impl WebBotAuthVerifier {
         message: &impl WebBotAuthSignedMessage,
         algorithm: Option<Algorithm>,
     ) -> Result<Self, ImplementationError> {
-        let signature_agent = match message.fetch_signature_agent() {
-            Some(agent) => Some(sfv::Parser::new(&agent).parse_item().map_err(|e| {
-                ImplementationError::ParsingError(format!(
-                    "Failed to parse `Signature-Agent` into valid sfv::Item: {e}"
-                ))
-            })?),
-            None => None,
-        };
-
-        let key_directory = signature_agent.and_then(|item| {
-            item.bare_item
-                .as_string()
-                .filter(|link| {
-                    link.as_str().starts_with("https") || link.as_str().starts_with("data")
-                })
-                .map(std::string::ToString::to_string)
-        });
-
+        let signature_agents = message.fetch_all_signature_agents();
         let web_bot_auth_verifier = Self {
             message_verifier: MessageVerifier::parse(message, algorithm, |(_, innerlist)| {
                 innerlist.params.contains_key("keyid")
@@ -706,43 +692,68 @@ impl WebBotAuthVerifier {
                         .is_some_and(|tag| tag.as_str() == "web-bot-auth")
                     && innerlist.items.iter().any(|item| {
                         *item == sfv::Item::new(sfv::StringRef::constant("@authority"))
-                            || (key_directory.is_some()
+                            || (!signature_agents.is_empty()
                                 && *item
                                     == sfv::Item::new(sfv::StringRef::constant("signature-agent")))
                     })
             })?,
-            key_directory,
+            parsed_directories: signature_agents
+                .iter()
+                .map(|header| {
+                    sfv::Parser::new(header).parse_item().map_err(|e| {
+                        ImplementationError::ParsingError(format!(
+                            "Failed to parse `Signature-Agent` into valid sfv::Item: {e}"
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .iter()
+                .flat_map(|item| {
+                    item.bare_item.as_string().and_then(|link| {
+                        let link_str = link.as_str();
+                        if link_str.starts_with("https://") || link_str.starts_with("http://") {
+                            return Some(SignatureAgentLink::External(String::from(link_str)));
+                        }
+
+                        if let Ok(url) = DataUrl::process(link_str) {
+                            let mediatype = url.mime_type();
+                            if mediatype.type_ == "application"
+                                && mediatype.subtype == "http-message-signatures-directory"
+                            {
+                                if let Ok((body, _)) = url.decode_to_vec() {
+                                    if let Ok(jwks) = serde_json::from_slice::<JSONWebKeySet>(&body)
+                                    {
+                                        return Some(SignatureAgentLink::Inline(jwks));
+                                    }
+                                }
+                            }
+                        }
+
+                        None
+                    })
+                })
+                .collect(),
         };
 
         Ok(web_bot_auth_verifier)
     }
 
+    /// Obtain list of Signature-Agents parsed and ready. This method is ideal for populating
+    /// a keyring ahead of time at your discretion.
+    pub fn get_signature_agents(&self) -> &Vec<SignatureAgentLink> {
+        &self.parsed_directories
+    }
+
     /// Verify the messsage, consuming the verifier in the process.
     /// If `key_id` is not supplied, a key ID to fetch the public key
     /// from `keyring` will be sourced from the `keyid` parameter
-    /// within the message. If `enforce_key_directory_lookup` is set,
-    /// verification will attempt to follow the `Signature-Agent` header
-    /// to ingest the JWK from an external directory. Note: we currently
-    /// do not implement ingesting JWKs from an external directory.
-    ///
-    /// # Errors
-    ///
-    /// Returns `ImplementationErrors` relevant to verifying and parsing.
-    pub fn verify(
+    /// within the message.
+    pub fn verify<'a>(
         self,
         keyring: &KeyRing,
-        key_id: Option<Thumbprint>,
-        enforce_key_directory_lookup: bool,
+        key_id: Option<String>,
     ) -> Result<SignatureTiming, ImplementationError> {
-        if (!enforce_key_directory_lookup && self.key_directory.is_some())
-            || self.key_directory.is_none()
-        {
-            return self.message_verifier.verify(keyring, key_id);
-        }
-
-        Err(ImplementationError::WebBotAuth(
-            WebBotAuthError::NotImplemented,
-        ))
+        self.message_verifier.verify(keyring, key_id)
     }
 
     /// Retrieve the parsed `ParameterDetails` from the message. Useful for logging
@@ -780,8 +791,8 @@ mod tests {
     }
 
     impl WebBotAuthSignedMessage for StandardTestVector {
-        fn fetch_signature_agent(&self) -> Option<String> {
-            None
+        fn fetch_all_signature_agents(&self) -> Vec<String> {
+            vec![]
         }
     }
 
@@ -806,10 +817,11 @@ mod tests {
             0x2b, 0x23, 0x2d, 0xbd, 0x72, 0x51, 0x7d, 0x08, 0x2f, 0xe8, 0x3c, 0xfb, 0x30, 0xdd,
             0xce, 0x43, 0xd1, 0xbb,
         ];
-        let keyring: KeyRing = HashMap::from_iter([(
+        let mut keyring = KeyRing::default();
+        keyring.import_raw(
             "poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U".to_string(),
             public_key.to_vec(),
-        )]);
+        );
         let verifier = MessageVerifier::parse(&test, None, |(_, _)| true).unwrap();
         let timing = verifier.verify(&keyring, None).unwrap();
         assert!(timing.generation.as_nanos() > 0);
@@ -824,16 +836,17 @@ mod tests {
             0x2b, 0x23, 0x2d, 0xbd, 0x72, 0x51, 0x7d, 0x08, 0x2f, 0xe8, 0x3c, 0xfb, 0x30, 0xdd,
             0xce, 0x43, 0xd1, 0xbb,
         ];
-        let keyring: KeyRing = HashMap::from_iter([(
+        let mut keyring = KeyRing::default();
+        keyring.import_raw(
             "poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U".to_string(),
             public_key.to_vec(),
-        )]);
+        );
         let verifier = WebBotAuthVerifier::parse(&test, None).unwrap();
         let advisory = verifier.get_details().possibly_insecure(|_| false);
         // Since the expiry date is in the past.
         assert!(advisory.is_expired.unwrap_or(true));
         assert!(!advisory.nonce_is_invalid.unwrap_or(true));
-        let timing = verifier.verify(&keyring, None, false).unwrap();
+        let timing = verifier.verify(&keyring, None).unwrap();
         assert!(timing.generation.as_nanos() > 0);
         assert!(timing.verification.as_nanos() > 0);
     }
@@ -881,8 +894,8 @@ mod tests {
         }
 
         impl WebBotAuthSignedMessage for MyTest {
-            fn fetch_signature_agent(&self) -> Option<String> {
-                None
+            fn fetch_all_signature_agents(&self) -> Vec<String> {
+                vec![]
             }
         }
 
@@ -898,10 +911,11 @@ mod tests {
             0x6a, 0x7d, 0x29, 0xc5,
         ];
 
-        let keyring: KeyRing = HashMap::from_iter([(
+        let mut keyring = KeyRing::default();
+        keyring.import_raw(
             "poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U".to_string(),
             public_key.to_vec(),
-        )]);
+        );
 
         let signer = MessageSigner {
             algorithm: Algorithm::Ed25519,
@@ -928,7 +942,7 @@ mod tests {
         assert!(!advisory.is_expired.unwrap_or(true));
         assert!(!advisory.nonce_is_invalid.unwrap_or(true));
 
-        let timing = verifier.verify(&keyring, None, false).unwrap();
+        let timing = verifier.verify(&keyring, None).unwrap();
         assert!(timing.generation.as_nanos() > 0);
         assert!(timing.verification.as_nanos() > 0);
     }
@@ -955,8 +969,8 @@ mod tests {
         }
 
         impl WebBotAuthSignedMessage for MissingParametersTestVector {
-            fn fetch_signature_agent(&self) -> Option<String> {
-                None
+            fn fetch_all_signature_agents(&self) -> Vec<String> {
+                vec![]
             }
         }
 

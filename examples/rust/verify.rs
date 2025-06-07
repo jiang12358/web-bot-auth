@@ -1,6 +1,7 @@
 use web_bot_auth::{
-    KeyRing, SignedMessage, WebBotAuthSignedMessage, WebBotAuthVerifier,
+    SignatureAgentLink, SignedMessage, WebBotAuthSignedMessage, WebBotAuthVerifier,
     components::{CoveredComponent, DerivedComponent},
+    keyring::KeyRing,
 };
 
 struct MySignedMsg;
@@ -23,8 +24,8 @@ impl SignedMessage for MySignedMsg {
 }
 
 impl WebBotAuthSignedMessage for MySignedMsg {
-    fn fetch_signature_agent(&self) -> Option<String> {
-        None
+    fn fetch_all_signature_agents(&self) -> Vec<String> {
+        vec!["https://mydata.com".into()]
     }
 }
 
@@ -35,15 +36,22 @@ fn main() {
         0x23, 0x2d, 0xbd, 0x72, 0x51, 0x7d, 0x08, 0x2f, 0xe8, 0x3c, 0xfb, 0x30, 0xdd, 0xce, 0x43,
         0xd1, 0xbb,
     ];
-    let keyring = KeyRing::from_iter([(
+    let mut keyring = KeyRing::default();
+    keyring.import_raw(
         "poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U".to_string(),
-        public_key,
-    )]);
+        public_key.to_vec(),
+    );
     let test = MySignedMsg {};
     let verifier = WebBotAuthVerifier::parse(&test, None).unwrap();
     let advisory = verifier.get_details().possibly_insecure(|_| false);
+    for url in verifier.get_signature_agents().iter() {
+        assert_eq!(
+            url,
+            &SignatureAgentLink::External("https://mydata.com".into())
+        )
+    }
     // Since the expiry date is in the past.
     assert!(advisory.is_expired.unwrap_or(true));
     assert!(!advisory.nonce_is_invalid.unwrap_or(true));
-    assert!(verifier.verify(&keyring, None, false).is_ok());
+    assert!(verifier.verify(&keyring, None).is_ok());
 }

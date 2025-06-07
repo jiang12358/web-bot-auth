@@ -1,6 +1,7 @@
 use web_bot_auth::{
-    KeyRing, MessageVerifier, SignedMessage,
+    MessageVerifier, SignedMessage,
     components::{CoveredComponent, DerivedComponent},
+    keyring::KeyRing,
 };
 
 struct MySignedMsg;
@@ -29,10 +30,11 @@ fn main() {
         0x23, 0x2d, 0xbd, 0x72, 0x51, 0x7d, 0x08, 0x2f, 0xe8, 0x3c, 0xfb, 0x30, 0xdd, 0xce, 0x43,
         0xd1, 0xbb,
     ];
-    let keyring = KeyRing::from_iter([(
+    let mut keyring = KeyRing::default();
+    keyring.import_raw(
         "poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U".to_string(),
-        public_key,
-    )]);
+        public_key.to_vec(),
+    );
     let test = MySignedMsg {};
     let verifier = MessageVerifier::parse(&test, None, |_| true).unwrap();
     let advisory = verifier.get_details().possibly_insecure(|_| false);
