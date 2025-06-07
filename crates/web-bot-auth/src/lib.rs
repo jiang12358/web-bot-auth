@@ -158,6 +158,44 @@ impl From<sfv::Parameters> for SignatureParams {
     }
 }
 
+/// Advises whether or not to accept the message as valid prior to
+/// verification, based on a cursory examination of the message parameters.
+pub struct SecurityAdvisory {
+    /// If the `expires` tag was present on the message, whether or not
+    /// the message expired in the past.
+    pub is_expired: Option<bool>,
+    /// If the `nonce` tag was present on the message, whether or not
+    /// the nonce was valid, as judged py a suitable nonce validator.
+    pub nonce_is_invalid: Option<bool>,
+}
+
+impl ParameterDetails {
+    /// Indicates whether or not the message has semantic errors
+    /// that suggest the message should not be verified on account of posing
+    /// a security risk. `nonce_validator` should return `true` if the nonce is
+    /// invalid, and `false` otherwise.
+    pub fn possibly_insecure<F>(&self, nonce_validator: F) -> SecurityAdvisory
+    where
+        F: FnOnce(&String) -> bool,
+    {
+        SecurityAdvisory {
+            is_expired: self.expires.map(|expires| {
+                if expires <= 0 {
+                    return true;
+                }
+
+                match SystemTime::now().duration_since(UNIX_EPOCH) {
+                    Ok(duration) => i64::try_from(duration.as_secs())
+                        .map(|dur| dur >= expires)
+                        .unwrap_or(true),
+                    Err(_) => true,
+                }
+            }),
+            nonce_is_invalid: self.nonce.as_ref().map(nonce_validator),
+        }
+    }
+}
+
 struct SignatureBaseBuilder {
     components: Vec<CoveredComponent>,
     parameters: SignatureParams,
@@ -248,21 +286,6 @@ impl SignatureBase {
 
     fn get_details(&self) -> ParameterDetails {
         self.parameters.details.clone()
-    }
-
-    fn is_expired(&self) -> Option<bool> {
-        self.parameters.details.expires.map(|expires| {
-            if expires <= 0 {
-                return true;
-            }
-
-            match SystemTime::now().duration_since(UNIX_EPOCH) {
-                Ok(duration) => i64::try_from(duration.as_secs())
-                    .map(|dur| dur >= expires)
-                    .unwrap_or(true),
-                Err(_) => true,
-            }
-        })
     }
 }
 
@@ -623,11 +646,6 @@ impl MessageVerifier {
             }
         }
     }
-
-    /// Whether or not this message is expired, based on its `expires` value.
-    pub fn is_expired(&self) -> Option<bool> {
-        self.parsed.base.is_expired()
-    }
 }
 
 /// A trait that messages wishing to be verified as a `web-bot-auth` method specifically
@@ -732,15 +750,6 @@ impl WebBotAuthVerifier {
     pub fn get_details(&self) -> ParameterDetails {
         self.message_verifier.get_details()
     }
-
-    /// Indicates whether or not the message has semantic errors
-    /// that pose a security risk, such as whether or not the message
-    /// is expired, the nonce is invalid, etc.
-    pub fn possibly_insecure(&self) -> bool {
-        self.message_verifier.is_expired().unwrap_or(false)
-
-        // TODO: Validate nonce somehow
-    }
 }
 
 #[cfg(test)]
@@ -820,8 +829,10 @@ mod tests {
             public_key.to_vec(),
         )]);
         let verifier = WebBotAuthVerifier::parse(&test, None).unwrap();
+        let advisory = verifier.get_details().possibly_insecure(|_| false);
         // Since the expiry date is in the past.
-        assert!(verifier.possibly_insecure());
+        assert!(advisory.is_expired.unwrap_or(true));
+        assert!(!advisory.nonce_is_invalid.unwrap_or(true));
         let timing = verifier.verify(&keyring, None, false).unwrap();
         assert!(timing.generation.as_nanos() > 0);
         assert!(timing.verification.as_nanos() > 0);
@@ -913,7 +924,9 @@ mod tests {
             .unwrap();
 
         let verifier = WebBotAuthVerifier::parse(&mytest, None).unwrap();
-        assert!(!verifier.possibly_insecure());
+        let advisory = verifier.get_details().possibly_insecure(|_| false);
+        assert!(!advisory.is_expired.unwrap_or(true));
+        assert!(!advisory.nonce_is_invalid.unwrap_or(true));
 
         let timing = verifier.verify(&keyring, None, false).unwrap();
         assert!(timing.generation.as_nanos() > 0);

@@ -7,5 +7,5 @@ This folder contains web-bot-auth examples with hardcoded request samples.
 To run them, use the following
 
 ```shell
-cargo run -p rust-examples --bin (signing|verify)
+cargo run -p rust-examples --bin (signing|verify|verify-arbitrary)
 ```

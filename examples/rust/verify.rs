@@ -41,7 +41,9 @@ fn main() {
     )]);
     let test = MySignedMsg {};
     let verifier = WebBotAuthVerifier::parse(&test, None).unwrap();
+    let advisory = verifier.get_details().possibly_insecure(|_| false);
     // Since the expiry date is in the past.
-    assert!(verifier.possibly_insecure());
+    assert!(advisory.is_expired.unwrap_or(true));
+    assert!(!advisory.nonce_is_invalid.unwrap_or(true));
     assert!(verifier.verify(&keyring, None, false).is_ok());
 }
