@@ -1,11 +1,11 @@
 use indexmap::IndexMap;
-use std::time::Duration;
+use std::{time::Duration, vec};
 use web_bot_auth::{
-    Algorithm, MessageSigner, UnsignedMessage,
-    components::{CoveredComponent, DerivedComponent},
+    components::{CoveredComponent, DerivedComponent, HTTPField, HTTPFieldParametersSet},
+    message_signatures::{Algorithm, MessageSigner, UnsignedMessage},
 };
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct MyThing {
     signature_input: String,
     signature_header: String,
@@ -13,10 +13,19 @@ pub(crate) struct MyThing {
 
 impl UnsignedMessage for MyThing {
     fn fetch_components_to_cover(&self) -> IndexMap<CoveredComponent, String> {
-        IndexMap::from_iter([(
-            CoveredComponent::Derived(DerivedComponent::Authority { req: false }),
-            "example.com".to_string(),
-        )])
+        IndexMap::from_iter([
+            (
+                CoveredComponent::Derived(DerivedComponent::Authority { req: false }),
+                "example.com".to_string(),
+            ),
+            (
+                CoveredComponent::HTTP(HTTPField {
+                    name: "signature-agent".to_string(),
+                    parameters: HTTPFieldParametersSet(vec![]),
+                }),
+                "\"https://myexample.com\"".to_string(),
+            ),
+        ])
     }
 
     fn register_header_contents(&mut self, signature_input: String, signature_header: String) {
@@ -45,4 +54,6 @@ fn main() {
 
     assert!(!headers.signature_input.is_empty());
     assert!(!headers.signature_header.is_empty());
+
+    println!("{:?}", headers);
 }

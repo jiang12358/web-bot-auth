@@ -1,7 +1,8 @@
 use web_bot_auth::{
-    SignatureAgentLink, SignedMessage, WebBotAuthSignedMessage, WebBotAuthVerifier,
+    SignatureAgentLink, WebBotAuthSignedMessage, WebBotAuthVerifier,
     components::{CoveredComponent, DerivedComponent},
     keyring::KeyRing,
+    message_signatures::SignedMessage,
 };
 
 struct MySignedMsg;
@@ -25,17 +26,15 @@ impl SignedMessage for MySignedMsg {
 
 impl WebBotAuthSignedMessage for MySignedMsg {
     fn fetch_all_signature_agents(&self) -> Vec<String> {
-        vec!["https://mydata.com".into()]
+        vec!["\"https://mydata.com\"".into()]
     }
 }
 
 fn main() {
     // Verifying a Web Bot Auth message
-    let public_key = vec![
-        0x26, 0xb4, 0x0b, 0x8f, 0x93, 0xff, 0xf3, 0xd8, 0x97, 0x11, 0x2f, 0x7e, 0xbc, 0x58, 0x2b,
+    let public_key = [0x26, 0xb4, 0x0b, 0x8f, 0x93, 0xff, 0xf3, 0xd8, 0x97, 0x11, 0x2f, 0x7e, 0xbc, 0x58, 0x2b,
         0x23, 0x2d, 0xbd, 0x72, 0x51, 0x7d, 0x08, 0x2f, 0xe8, 0x3c, 0xfb, 0x30, 0xdd, 0xce, 0x43,
-        0xd1, 0xbb,
-    ];
+        0xd1, 0xbb];
     let mut keyring = KeyRing::default();
     keyring.import_raw(
         "poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U".to_string(),

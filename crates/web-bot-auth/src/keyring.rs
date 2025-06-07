@@ -117,7 +117,7 @@ pub struct KeyRing {
 impl FromIterator<(String, PublicKey)> for KeyRing {
     fn from_iter<T: IntoIterator<Item = (String, PublicKey)>>(iter: T) -> KeyRing {
         KeyRing {
-            ring: HashMap::from_iter(iter.into_iter()),
+            ring: HashMap::from_iter(iter),
         }
     }
 }
