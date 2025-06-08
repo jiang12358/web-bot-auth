@@ -62,7 +62,8 @@ pub enum Thumbprintable {
 /// Representation of a JSON Web Key Set
 #[derive(Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct JSONWebKeySet {
-    keys: Vec<Thumbprintable>,
+    /// List of keys contained in the set.
+    pub keys: Vec<Thumbprintable>,
 }
 
 impl Thumbprintable {
