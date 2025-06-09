@@ -99,7 +99,8 @@ pub trait WebBotAuthSignedMessage: SignedMessage {
     /// Obtain every `Signature-Agent` header in the message. Despite the name, you can omit
     /// `Signature-Agents` that are known to be invalid ahead of time. However, each `Signature-Agent`
     /// header must be unparsed and a be a valid sfv::Item::String value (meaning it should be encased
-    /// in double quotes).
+    /// in double quotes). You should separately implement looking this up in `SignedMessage::lookup_component`
+    /// as an HTTP header with multiple values.
     fn fetch_all_signature_agents(&self) -> Vec<String>;
 }
 
@@ -234,11 +235,11 @@ mod tests {
     struct StandardTestVector {}
 
     impl SignedMessage for StandardTestVector {
-        fn fetch_signature_header(&self) -> Option<String> {
-            Some("sig1=:uz2SAv+VIemw+Oo890bhYh6Xf5qZdLUgv6/PbiQfCFXcX/vt1A8Pf7OcgL2yUDUYXFtffNpkEr5W6dldqFrkDg==:".to_owned())
+        fn fetch_all_signature_headers(&self) -> Vec<String> {
+            vec!["sig1=:uz2SAv+VIemw+Oo890bhYh6Xf5qZdLUgv6/PbiQfCFXcX/vt1A8Pf7OcgL2yUDUYXFtffNpkEr5W6dldqFrkDg==:".to_owned()]
         }
-        fn fetch_signature_input(&self) -> Option<String> {
-            Some(r#"sig1=("@authority");created=1735689600;keyid="poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U";alg="ed25519";expires=1735693200;nonce="gubxywVx7hzbYKatLgzuKDllDAIXAkz41PydU7aOY7vT+Mb3GJNxW0qD4zJ+IOQ1NVtg+BNbTCRUMt1Ojr5BgA==";tag="web-bot-auth""#.to_owned())
+        fn fetch_all_signature_inputs(&self) -> Vec<String> {
+            vec![r#"sig1=("@authority");created=1735689600;keyid="poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U";alg="ed25519";expires=1735693200;nonce="gubxywVx7hzbYKatLgzuKDllDAIXAkz41PydU7aOY7vT+Mb3GJNxW0qD4zJ+IOQ1NVtg+BNbTCRUMt1Ojr5BgA==";tag="web-bot-auth""#.to_owned()]
         }
         fn lookup_component(&self, name: &CoveredComponent) -> Option<String> {
             match *name {
@@ -305,11 +306,11 @@ mod tests {
         }
 
         impl SignedMessage for MyTest {
-            fn fetch_signature_header(&self) -> Option<String> {
-                Some(self.signature_header.clone())
+            fn fetch_all_signature_headers(&self) -> Vec<String> {
+                vec![self.signature_header.clone()]
             }
-            fn fetch_signature_input(&self) -> Option<String> {
-                Some(self.signature_input.clone())
+            fn fetch_all_signature_inputs(&self) -> Vec<String> {
+                vec![self.signature_input.clone()]
             }
             fn lookup_component(&self, name: &CoveredComponent) -> Option<String> {
                 match *name {
@@ -380,11 +381,13 @@ mod tests {
         struct MissingParametersTestVector {}
 
         impl SignedMessage for MissingParametersTestVector {
-            fn fetch_signature_header(&self) -> Option<String> {
-                Some("sig1=:uz2SAv+VIemw+Oo890bhYh6Xf5qZdLUgv6/PbiQfCFXcX/vt1A8Pf7OcgL2yUDUYXFtffNpkEr5W6dldqFrkDg==:".to_owned())
+            fn fetch_all_signature_headers(&self) -> Vec<String> {
+                vec![
+                    "sig1=:uz2SAv+VIemw+Oo890bhYh6Xf5qZdLUgv6/PbiQfCFXcX/vt1A8Pf7OcgL2yUDUYXFtffNpkEr5W6dldqFrkDg==:".to_owned()
+                ]
             }
-            fn fetch_signature_input(&self) -> Option<String> {
-                Some(r#"sig1=("@authority");created=1735689600;keyid="poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U";alg="ed25519";expires=1735693200;nonce="gubxywVx7hzbYKatLgzuKDllDAIXAkz41PydU7aOY7vT+Mb3GJNxW0qD4zJ+IOQ1NVtg+BNbTCRUMt1Ojr5BgA==";tag="not-web-bot-auth""#.to_owned())
+            fn fetch_all_signature_inputs(&self) -> Vec<String> {
+                vec![r#"sig1=("@authority");created=1735689600;keyid="poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U";alg="ed25519";expires=1735693200;nonce="gubxywVx7hzbYKatLgzuKDllDAIXAkz41PydU7aOY7vT+Mb3GJNxW0qD4zJ+IOQ1NVtg+BNbTCRUMt1Ojr5BgA==";tag="not-web-bot-auth""#.to_owned()]
             }
             fn lookup_component(&self, name: &CoveredComponent) -> Option<String> {
                 match *name {
@@ -411,11 +414,11 @@ mod tests {
         struct MissingParametersTestVector {}
 
         impl SignedMessage for MissingParametersTestVector {
-            fn fetch_signature_header(&self) -> Option<String> {
-                Some("sig1=:uz2SAv+VIemw+Oo890bhYh6Xf5qZdLUgv6/PbiQfCFXcX/vt1A8Pf7OcgL2yUDUYXFtffNpkEr5W6dldqFrkDg==:".to_owned())
+            fn fetch_all_signature_headers(&self) -> Vec<String> {
+                vec!["sig1=:uz2SAv+VIemw+Oo890bhYh6Xf5qZdLUgv6/PbiQfCFXcX/vt1A8Pf7OcgL2yUDUYXFtffNpkEr5W6dldqFrkDg==:".to_owned()]
             }
-            fn fetch_signature_input(&self) -> Option<String> {
-                Some(r#"sig1=("@authority");created=1735689600;keyid="poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U";alg="ed25519";expires=1735693200;nonce="gubxywVx7hzbYKatLgzuKDllDAIXAkz41PydU7aOY7vT+Mb3GJNxW0qD4zJ+IOQ1NVtg+BNbTCRUMt1Ojr5BgA==";tag="web-bot-auth""#.to_owned())
+            fn fetch_all_signature_inputs(&self) -> Vec<String> {
+                vec![r#"sig1=("@authority");created=1735689600;keyid="poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U";alg="ed25519";expires=1735693200;nonce="gubxywVx7hzbYKatLgzuKDllDAIXAkz41PydU7aOY7vT+Mb3GJNxW0qD4zJ+IOQ1NVtg+BNbTCRUMt1Ojr5BgA==";tag="web-bot-auth""#.to_owned()]
             }
             fn lookup_component(&self, name: &CoveredComponent) -> Option<String> {
                 match *name {
@@ -442,11 +445,11 @@ mod tests {
         struct StandardTestVector {}
 
         impl SignedMessage for StandardTestVector {
-            fn fetch_signature_header(&self) -> Option<String> {
-                Some("sig1=:3q7S1TtbrFhQhpcZ1gZwHPCFHTvdKXNY1xngkp6lyaqqqv3QZupwpu/wQG5a7qybnrj2vZYMeVKuWepm+rNkDw==:".to_owned())
+            fn fetch_all_signature_headers(&self) -> Vec<String> {
+                vec!["sig1=:3q7S1TtbrFhQhpcZ1gZwHPCFHTvdKXNY1xngkp6lyaqqqv3QZupwpu/wQG5a7qybnrj2vZYMeVKuWepm+rNkDw==:".to_owned()]
             }
-            fn fetch_signature_input(&self) -> Option<String> {
-                Some(r#"sig1=("@authority" "signature-agent");alg="ed25519";keyid="poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U";nonce="ZO3/XMEZjrvSnLtAP9M7jK0WGQf3J+pbmQRUpKDhF9/jsNCWqUh2sq+TH4WTX3/GpNoSZUa8eNWMKqxWp2/c2g==";tag="web-bot-auth";created=1749331474;expires=1749331484"#.to_owned())
+            fn fetch_all_signature_inputs(&self) -> Vec<String> {
+                vec![r#"sig1=("@authority" "signature-agent");alg="ed25519";keyid="poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U";nonce="ZO3/XMEZjrvSnLtAP9M7jK0WGQf3J+pbmQRUpKDhF9/jsNCWqUh2sq+TH4WTX3/GpNoSZUa8eNWMKqxWp2/c2g==";tag="web-bot-auth";created=1749331474;expires=1749331484"#.to_owned()]
             }
             fn lookup_component(&self, name: &CoveredComponent) -> Option<String> {
                 match name {
