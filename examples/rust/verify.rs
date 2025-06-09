@@ -22,11 +22,11 @@ use web_bot_auth::{
 struct MySignedMsg;
 
 impl SignedMessage for MySignedMsg {
-    fn fetch_signature_header(&self) -> Option<String> {
-        Some("sig1=:GXzHSRZ9Sf6WwLOZjxAhfE6WEUPfDMrVBJITsL2sbG8gtcZgqKe2Yn7uavk0iNQrfcPzgGq8h8Pk5osNGqdtCw==:".to_owned())
+    fn fetch_all_signature_headers(&self) -> Vec<String> {
+        vec!["sig1=:GXzHSRZ9Sf6WwLOZjxAhfE6WEUPfDMrVBJITsL2sbG8gtcZgqKe2Yn7uavk0iNQrfcPzgGq8h8Pk5osNGqdtCw==:".to_owned()]
     }
-    fn fetch_signature_input(&self) -> Option<String> {
-        Some(r#"sig1=("@authority" "signature-agent");alg="ed25519";keyid="poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U";nonce="ZO3/XMEZjrvSnLtAP9M7jK0WGQf3J+pbmQRUpKDhF9/jsNCWqUh2sq+TH4WTX3/GpNoSZUa8eNWMKqxWp2/c2g==";tag="web-bot-auth";created=1749332605;expires=1749332615"#.to_owned())
+    fn fetch_all_signature_inputs(&self) -> Vec<String> {
+        vec![r#"sig1=("@authority" "signature-agent");alg="ed25519";keyid="poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U";nonce="ZO3/XMEZjrvSnLtAP9M7jK0WGQf3J+pbmQRUpKDhF9/jsNCWqUh2sq+TH4WTX3/GpNoSZUa8eNWMKqxWp2/c2g==";tag="web-bot-auth";created=1749332605;expires=1749332615"#.to_owned()]
     }
     fn lookup_component(&self, name: &CoveredComponent) -> Option<String> {
         match name {

@@ -226,10 +226,23 @@ impl fmt::Display for Algorithm {
 /// Trait that messages seeking verification should implement to facilitate looking up
 /// raw values from the underlying message.
 pub trait SignedMessage {
-    /// Obtain the parsed version of `Signature` HTTP header
-    fn fetch_signature_header(&self) -> Option<String>;
-    /// Obtain the parsed version of `Signature-Input` HTTP header
-    fn fetch_signature_input(&self) -> Option<String>;
+    /// Obtain every `Signature` header in the message. Despite the name, you can omit
+    /// `Signature` that are known to be invalid ahead of time. However, each `Signature-`
+    /// header should be unparsed and be a valid sfv::Item::Dictionary value. You should
+    /// separately implement looking this up in `lookup_component` as an HTTP header with
+    /// multiple values, although including these as signature components when signing is
+    /// NOT recommended. During verification, invalid values (those that cannot be
+    /// parsed as an sfv::Dictionary) will be skipped without raising an error.
+    fn fetch_all_signature_headers(&self) -> Vec<String>;
+    /// Obtain every `Signature-Input` header in the message. Despite the name, you
+    /// can omit `Signature-Input` that are known to be invalid ahead of time. However,
+    /// each `Signature-Input` header should be unparsed and be a valid sfv::Item::Dictionary
+    /// value (meaning it should be encased in double quotes). You should separately implement
+    /// looking this up in `lookup_component` as an HTTP header with multiple values, although
+    /// including these as signature components when signing is NOT recommended. During
+    /// verification, invalid values (those that cannot be parsed as an sfv::Dictionary) will
+    /// be skipped will be skipped without raising an error.
+    fn fetch_all_signature_inputs(&self) -> Vec<String>;
     /// Obtain the serialized value of a covered component. Implementations should
     /// respect any parameter values set on the covered component per the message
     /// signature spec. Component values that cannot be found must return None.
@@ -244,7 +257,9 @@ pub trait SignedMessage {
 /// and `Signature` header contents.
 pub trait UnsignedMessage {
     /// Obtain a list of covered components to be included. HTTP fields must be lowercased before
-    /// emitting.
+    /// emitting. It is NOT RECOMMENDED to include `signature` and `signature-input` fields here.
+    /// If signing a Web Bot Auth message, and `Signature-Agent` header is intended present, you MUST
+    /// include it as a component here for successful verification.
     fn fetch_components_to_cover(&self) -> IndexMap<CoveredComponent, String>;
     /// Store the contents of a generated `Signature-Input` and `Signature` header value.
     /// It is the responsibility of the application to generate a consistent label for both.
@@ -422,35 +437,29 @@ impl MessageVerifier {
     where
         P: Fn(&(sfv::Key, sfv::InnerList)) -> bool,
     {
-        let unparsed_signature_header =
-            message
-                .fetch_signature_header()
-                .ok_or(ImplementationError::ParsingError(
-                    "No `Signature` header value ".into(),
-                ))?;
+        let signature_input = message
+            .fetch_all_signature_inputs()
+            .into_iter()
+            .filter_map(|sig_input| sfv::Parser::new(&sig_input).parse_dictionary().ok())
+            .reduce(|mut acc, sig_input| {
+                acc.extend(sig_input);
+                acc
+            })
+            .ok_or(ImplementationError::ParsingError(
+                "No `Signature-Input` headers found".to_string(),
+            ))?;
 
-        let unparsed_signature_input =
-            message
-                .fetch_signature_input()
-                .ok_or(ImplementationError::ParsingError(
-                    "No `Signature-Input` value ".into(),
-                ))?;
-
-        let signature_input = sfv::Parser::new(&unparsed_signature_input)
-            .parse_dictionary()
-            .map_err(|e| {
-                ImplementationError::ParsingError(format!(
-                    "Failed to parse `Signature-Input` header into sfv::Dictionary: {e}"
-                ))
-            })?;
-
-        let mut signature_header = sfv::Parser::new(&unparsed_signature_header)
-            .parse_dictionary()
-            .map_err(|e| {
-                ImplementationError::ParsingError(format!(
-                    "Failed to parse `Signature` header into sfv::Dictionary: {e}"
-                ))
-            })?;
+        let mut signature_header = message
+            .fetch_all_signature_headers()
+            .into_iter()
+            .filter_map(|sig_input| sfv::Parser::new(&sig_input).parse_dictionary().ok())
+            .reduce(|mut acc, sig_input| {
+                acc.extend(sig_input);
+                acc
+            })
+            .ok_or(ImplementationError::ParsingError(
+                "No `Signature` headers found".to_string(),
+            ))?;
 
         let (label, innerlist) = signature_input
             .into_iter()
@@ -570,11 +579,11 @@ mod tests {
     struct StandardTestVector {}
 
     impl SignedMessage for StandardTestVector {
-        fn fetch_signature_header(&self) -> Option<String> {
-            Some("sig1=:uz2SAv+VIemw+Oo890bhYh6Xf5qZdLUgv6/PbiQfCFXcX/vt1A8Pf7OcgL2yUDUYXFtffNpkEr5W6dldqFrkDg==:".to_owned())
+        fn fetch_all_signature_headers(&self) -> Vec<String> {
+            vec!["sig1=:uz2SAv+VIemw+Oo890bhYh6Xf5qZdLUgv6/PbiQfCFXcX/vt1A8Pf7OcgL2yUDUYXFtffNpkEr5W6dldqFrkDg==:".to_owned()]
         }
-        fn fetch_signature_input(&self) -> Option<String> {
-            Some(r#"sig1=("@authority");created=1735689600;keyid="poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U";alg="ed25519";expires=1735693200;nonce="gubxywVx7hzbYKatLgzuKDllDAIXAkz41PydU7aOY7vT+Mb3GJNxW0qD4zJ+IOQ1NVtg+BNbTCRUMt1Ojr5BgA==";tag="web-bot-auth""#.to_owned())
+        fn fetch_all_signature_inputs(&self) -> Vec<String> {
+            vec![r#"sig1=("@authority");created=1735689600;keyid="poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U";alg="ed25519";expires=1735693200;nonce="gubxywVx7hzbYKatLgzuKDllDAIXAkz41PydU7aOY7vT+Mb3GJNxW0qD4zJ+IOQ1NVtg+BNbTCRUMt1Ojr5BgA==";tag="web-bot-auth""#.to_owned()]
         }
         fn lookup_component(&self, name: &CoveredComponent) -> Option<String> {
             match *name {
