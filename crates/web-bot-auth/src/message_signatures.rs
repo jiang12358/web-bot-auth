@@ -15,7 +15,7 @@ struct SignatureParams {
 }
 
 /// Parsed values from `Signature-Input` header.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParameterDetails {
     /// The value of the `alg` parameter, if present and resolves to a known algorithm.
     pub algorithm: Option<Algorithm>,
@@ -209,7 +209,7 @@ impl SignatureBase {
 
 /// Subset of [HTTP signature algorithm](https://www.iana.org/assignments/http-message-signature/http-message-signature.xhtml)
 /// implemented in this module. In the future, we may support more.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Algorithm {
     /// [The `ed25519` algorithm](https://www.rfc-editor.org/rfc/rfc9421#name-eddsa-using-curve-edwards25)
     Ed25519,
