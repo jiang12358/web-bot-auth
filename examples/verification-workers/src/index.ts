@@ -25,8 +25,14 @@ import {
 	verify,
 } from "web-bot-auth";
 import { invalidHTML, neutralHTML, validHTML } from "./html";
-import jwk from "../../rfc9421-keys/ed25519.json" assert { type: "json" };
 import { Ed25519Signer } from "web-bot-auth/crypto";
+
+const jwk = {
+  "kty": "OKP",
+  "crv": "Ed25519",
+  "kid": "test-key-ed25519",
+  "x": "l2Bi7U1DPOApf8TDBkSIPM-EvXwpJVuBQdzcBkeD2bM"
+};
 
 const getDirectory = async (): Promise<Directory> => {
 	const key = {
